@@ -19,7 +19,7 @@ hora_fim = datetime.strptime(hora_fim_str, "%H:%M").time()
 
 df = pd.read_csv("data/bares.csv")
 
-with open("data/distancias.pkl", "rb") as f:
+with open("data/matriz_tempo_minutos.pkl", "rb") as f:
     distancias, tempos = pickle.load(f)
 
 tempo_visita = timedelta(hours=1)

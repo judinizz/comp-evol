@@ -6,11 +6,11 @@ from copy import deepcopy
 def carregar_dados():
     try:
         bares_df = pd.read_csv("data/bares.csv")
-        with open("data/distancias.pkl", "rb") as f:
+        with open("data/matriz_tempo_minutos.pkl", "rb") as f:
             distancias, tempos = pickle.load(f)
     except FileNotFoundError:
         bares_df = pd.read_csv("../data/bares.csv")
-        with open("../data/distancias.pkl", "rb") as f:
+        with open("../data/matriz_tempo_minutos.pkl", "rb") as f:
             distancias, tempos = pickle.load(f)
     
     return bares_df, distancias, tempos

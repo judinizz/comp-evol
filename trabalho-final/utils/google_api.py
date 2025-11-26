@@ -11,7 +11,7 @@ def converter_coordenada(coord_str):
         return float(coord_str.replace('.', '')) / 1000000
     return float(coord_str)
 
-def obter_matriz_distancia(df, api_key, cache_path="../data/distancias.pkl"):
+def obter_matriz_distancia(df, api_key, cache_path="../data/matriz_tempo_minutos.pkl"):
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     
     if os.path.exists(cache_path):
@@ -64,7 +64,7 @@ def obter_matriz_distancia(df, api_key, cache_path="../data/distancias.pkl"):
 
     return distancias, tempos
 
-def salvar_matriz_csv(df, cache_path="../data/distancias.pkl", output_path="../data/matriz_distancias.csv"):
+def salvar_matriz_csv(df, cache_path="../data/matriz_tempo_minutos.pkl", output_path="../data/matriz_distancias.csv"):
     if not os.path.exists(cache_path):
         print(f"Arquivo {cache_path} não encontrado!")
         return

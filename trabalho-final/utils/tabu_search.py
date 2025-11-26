@@ -6,7 +6,7 @@ from .avalia_rota import avaliar_rota
 
 def carregar_dados():
     bares_df = pd.read_csv("../data/bares.csv")
-    with open("../data/distancias.pkl", "rb") as f:
+    with open("../data/matriz_tempo_minutos.pkl", "rb") as f:
         distancias, tempos = pickle.load(f)
     
     return bares_df, distancias, tempos
