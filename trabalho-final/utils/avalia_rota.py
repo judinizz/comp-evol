@@ -1,99 +1,145 @@
-import pandas as pd
 from datetime import datetime, timedelta
 
-DIAS_SEMANA = {
-    0: "Seg",      
-    1: "Ter",      
-    2: "Qua",     
-    3: "Qui",      
-    4: "Sex",     
-    5: "Sáb",     
-    6: "Dom"       
-}
+import pandas as pd
 
-def avaliar_rota(rota, tempos, bares, hora_inicial, hora_final, tempo_visita, alpha=1.0, beta=20.0):
-    hora_atual = hora_inicial
-    tempo_total = 0
-    soma_notas = 0
-    penalidade = 0
-    
-    data_inicio = hora_inicial.date()
-    data_fim = hora_final.date()
-    hora_dia_inicio = hora_inicial.time()
-    hora_dia_fim = hora_final.time()
 
-    for i in range(len(rota) - 1):
-        origem = rota[i]
-        destino = rota[i + 1]
-        bar_dest = bares.iloc[destino]
+class CacheHorarios:
+    """Cache simples para horários de abertura/fechamento por bar e dia da semana.
 
-        tempo_desloc = timedelta(minutes=tempos[origem][destino])
-        nova_hora = hora_atual + tempo_desloc
-        tempo_total += tempos[origem][destino]
+    Armazena tuplas (abertura, fechamento) onde cada um é timedelta desde meia-noite
+    ou None quando não informado.
+    """
 
-        hora_limite_dia = datetime.combine(nova_hora.date(), hora_dia_fim)
-        
-        if nova_hora > hora_limite_dia and nova_hora.date() <= data_fim:
-            proxima_data = nova_hora.date() + timedelta(days=1)
-            if proxima_data <= data_fim:
-                nova_hora = datetime.combine(proxima_data, hora_dia_inicio)
-                penalidade += 100  
-            else:
-                penalidade += 5000
-                break
-        elif nova_hora > hora_final:
-            penalidade += 5000
-            break
+    DIAS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
-        hora_atual = nova_hora
+    def __init__(self, bares_df: pd.DataFrame):
+        self.bares_df = bares_df
+        self._cache = {}
 
-        dia_semana = DIAS_SEMANA[hora_atual.weekday()]
-        abertura_col = f"{dia_semana} (Abertura)"
-        fechamento_col = f"{dia_semana} (Fechamento)"
-
-        if abertura_col not in bares.columns or fechamento_col not in bares.columns:
-            penalidade += 1000
-            continue
-
-        abertura_str = bar_dest[abertura_col]
-        fechamento_str = bar_dest[fechamento_col]
-        
-        if pd.isna(abertura_str) or pd.isna(fechamento_str) or abertura_str == "" or fechamento_str == "":
-            penalidade += 1000
-            continue
-
+    @staticmethod
+    def _parse_horario(valor):
+        if valor is None:
+            return None
         try:
-            if ':' in str(abertura_str):
-                if len(str(abertura_str).split(':')) == 3:
-                    abertura = datetime.combine(hora_atual.date(), datetime.strptime(str(abertura_str), "%H:%M:%S").time())
-                else:
-                    abertura = datetime.combine(hora_atual.date(), datetime.strptime(str(abertura_str), "%H:%M").time())
-            else:
-                abertura = datetime.combine(hora_atual.date(), datetime.strptime(str(abertura_str), "%H:%M").time())
-                
-            if ':' in str(fechamento_str):
-                if len(str(fechamento_str).split(':')) == 3:
-                    fechamento = datetime.combine(hora_atual.date(), datetime.strptime(str(fechamento_str), "%H:%M:%S").time())
-                else:
-                    fechamento = datetime.combine(hora_atual.date(), datetime.strptime(str(fechamento_str), "%H:%M").time())
-            else:
-                fechamento = datetime.combine(hora_atual.date(), datetime.strptime(str(fechamento_str), "%H:%M").time())
-                
-        except ValueError:
-            penalidade += 1000
-            continue
-            
-        if fechamento < abertura:
-            fechamento += timedelta(days=1)
+            s = str(valor).strip()
+            if s == "" or s.lower() in {"nan", "none"}:
+                return None
+            parts = s.split(":")
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            return timedelta(hours=h, minutes=m)
+        except Exception:
+            return None
 
-        if not (abertura <= hora_atual <= fechamento):
-            penalidade += 1000
-        else:
-            avaliacao_str = bar_dest['Avaliação']
-            nota_bar = float(str(avaliacao_str).replace(',', '.'))                
-            soma_notas += nota_bar
+    def obter(self, idx_bar: int, dia_semana: int):
+        chave = (idx_bar, dia_semana)
+        if chave in self._cache:
+            return self._cache[chave]
 
-        hora_atual += tempo_visita
+        row = self.bares_df.iloc[idx_bar] if idx_bar < len(self.bares_df) else None
+        if row is None:
+            self._cache[chave] = (None, None)
+            return (None, None)
 
-    custo = alpha * tempo_total - beta * soma_notas + penalidade
-    return custo
+        col_ab = f"{self.DIAS[dia_semana]} (Abertura)"
+        col_fc = f"{self.DIAS[dia_semana]} (Fechamento)"
+
+        ab = self._parse_horario(row.get(col_ab, None))
+        fc = self._parse_horario(row.get(col_fc, None))
+        self._cache[chave] = (ab, fc)
+        return (ab, fc)
+
+
+def avaliar_rota(
+    rota, tempos, bares, hora_inicial, hora_final, tempo_visita, alpha=1.0, beta=20.0
+):
+    """
+    Avalia uma rota retornando um custo numérico menor = melhor.
+
+    O custo combina:
+     - tempo total de locomoção + visitas (em minutos)
+     - penalidades por chegar fora do horário de funcionamento
+     - recompensa por nota (beta * soma_notas)
+
+    Otimizações implementadas:
+     - CacheHorarios para evitar parsing repetido de strings das colunas
+     - iteração linear sobre a rota
+    """
+
+    # normalizações e caches
+    cache = CacheHorarios(bares)
+    total_tempo = 0.0 
+    total_nota = 0.0
+    penalidade = 0.0
+
+    hora_atual = hora_inicial
+
+    n = len(rota)
+    if n == 0:
+        return float("inf")
+
+    # itera sobre a sequência (não fechamos a rota em ciclo a menos que queira)
+    for pos in range(n - 1):
+        origem = rota[pos]
+        destino = rota[pos + 1]
+
+        t = float(tempos[origem][destino])
+        total_tempo += t
+        hora_atual = hora_atual + timedelta(minutes=t)
+
+        visita_min = (
+            tempo_visita.total_seconds() / 60.0
+            if isinstance(tempo_visita, timedelta)
+            else float(tempo_visita)
+        )
+        total_tempo += visita_min
+        hora_atual = hora_atual + timedelta(minutes=visita_min)
+
+        row = bares.iloc[destino]
+        nota = 0.0
+        if "Nota" in bares.columns:
+            try:
+                nota = float(row.get("Nota", 0) or 0)
+            except Exception:
+                nota = 0.0
+
+        total_nota += nota
+
+        # penalidades por horário (usando cache)
+        dia = hora_atual.weekday()
+        hor_ab, hor_fc = cache.obter(destino, dia)
+        if hor_ab is not None and hor_fc is not None:
+            desde_meia_noite = timedelta(
+                hours=hora_atual.hour, minutes=hora_atual.minute
+            )
+            if desde_meia_noite < hor_ab:
+                diff = (hor_ab - desde_meia_noite).total_seconds() / 60.0
+                penalidade += diff * 2.0
+            elif desde_meia_noite > hor_fc:
+                penalidade += 1000.0
+
+    # custo final: tempo ponderado + penalidades - recompensa por notas
+    custo = alpha * total_tempo + penalidade - beta * total_nota
+    return float(custo)
+
+
+if __name__ == "__main__":
+    import pickle
+    from datetime import datetime, timedelta
+
+    import pandas as pd
+
+    df = pd.read_csv("../data/bares.csv")
+    with open("../data/distancias.pkl", "rb") as f:
+        distancias, tempos = pickle.load(f)
+
+    rota = list(range(min(8, len(df))))
+    custo = avaliar_rota(
+        rota,
+        tempos,
+        df,
+        datetime(2024, 11, 12, 18, 0),
+        datetime(2024, 11, 12, 23, 0),
+        timedelta(minutes=30),
+    )
+    print(f"Custo (teste): {custo}")

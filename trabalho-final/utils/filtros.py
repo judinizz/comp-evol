@@ -18,5 +18,3 @@ def filtrar_bares(df, nota_min=0, preco_max=None, hora_inicio=None, hora_fim=Non
         filtrado = filtrado[filtrado.apply(aberto_no_intervalo, axis=1)]
 
     return filtrado.reset_index(drop=True)
-
-
